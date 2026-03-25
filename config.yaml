@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────
+# Daily Digest — source configuration
+# Edit this file to add/remove sources.
+# Commit and push → next run picks it up.
+# ─────────────────────────────────────────────
+
+settings:
+  lookback_hours: 24          # how far back to fetch new items
+  max_items_per_source: 3     # cap per source to keep email manageable
+  model: claude-haiku-4-5-20251001   # swap to claude-sonnet-4-6 for better summaries
+  whisper_model: base         # tiny | base | small — podcast transcription quality
+
+  # Summarization persona — change this to fit your role
+  persona: "a senior RevOps and GTM consultant who advises B2B SaaS companies"
+
+sources:
+
+  # ── Blogs (RSS) ──────────────────────────────
+  - name: Applied AI for Ops
+    type: rss
+    url: https://www.appliedaiformops.com/feed
+    tags: [ai, operations]
+
+  - name: Benn Stancil
+    type: rss
+    url: https://benn.substack.com/feed
+    tags: [data, strategy]
+
+  - name: Lenny's Newsletter
+    type: rss
+    url: https://www.lennysnewsletter.com/feed
+    tags: [product, gtm]
+
+  # ── Substacks ────────────────────────────────
+  # Pattern: https://<name>.substack.com/feed
+  - name: Kyle Poyar
+    type: rss
+    url: https://kylepoyar.substack.com/feed
+    tags: [gtm, pricing]
+
+  # ── Podcasts ─────────────────────────────────
+  # Requires ffmpeg (installed automatically in the workflow)
+  - name: Practical AI
+    type: podcast
+    url: https://changelog.com/practicalai/feed
+    tags: [ai]
+
+  # ── To add a new source ───────────────────────
+  # Just copy any block above, update name/url/tags, commit, push.
+  # Finding RSS feeds:
+  #   Substack  → https://<name>.substack.com/feed
+  #   Ghost     → https://<site>/rss/
+  #   WordPress → https://<site>/feed/
+  #   Other     → try /feed, /rss, /rss.xml, /atom.xml
