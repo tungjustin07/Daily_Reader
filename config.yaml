@@ -47,6 +47,11 @@ sources:
     type: rss
     url: https://growthstackmafia.com/feed
     tags: [gtm, growth]
+
+  - name: GTM Cafe
+    type: rss
+    url: https://gtmcafe.beehiiv.com/feed
+    tags: [gtm, sales]
  
   # ── Podcasts ─────────────────────────────────
   # Requires ffmpeg (installed automatically in the workflow)
