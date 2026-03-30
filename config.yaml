@@ -52,6 +52,11 @@ sources:
     type: rss
     url: https://gtmcafe.beehiiv.com/feed
     tags: [gtm, sales]
+
+  - name: Hils
+    type: rss
+    url: https://hils.substack.com/feed
+    tags: [ai, gtm]
  
   # ── Podcasts ─────────────────────────────────
   # Requires ffmpeg (installed automatically in the workflow)
