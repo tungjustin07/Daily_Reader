@@ -24,6 +24,12 @@ import yaml
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+# Shared HTTP client — connection pooling, timeouts, reused across all fetches
+_http = httpx.Client(timeout=httpx.Timeout(20.0, read=60.0), follow_redirects=True)
+
+# Whisper model cache — load once per model name per process
+_whisper_models: dict = {}
+
 load_dotenv()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -79,7 +85,7 @@ def mark_seen(conn, url: str):
         "INSERT OR IGNORE INTO seen (url_hash, url, seen_at) VALUES (?,?,?)",
         (h, url, datetime.now(timezone.utc).isoformat()),
     )
-    conn.commit()
+    # No commit here — caller batches and commits once after the loop
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FETCH
@@ -87,7 +93,7 @@ def mark_seen(conn, url: str):
 
 def fetch_full_text(url: str) -> str:
     try:
-        resp = httpx.get(f"https://r.jina.ai/{url}", timeout=20, follow_redirects=True)
+        resp = _http.get(f"https://r.jina.ai/{url}")
         if resp.status_code == 200 and len(resp.text) > 300:
             return resp.text[:12000]
     except Exception as e:
@@ -158,12 +164,14 @@ def transcribe_audio(audio_url: str, title: str, whisper_model: str) -> str:
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
         tmp_path = tmp.name
     try:
-        with httpx.stream("GET", audio_url, timeout=120, follow_redirects=True) as r:
+        with _http.stream("GET", audio_url, timeout=httpx.Timeout(120.0)) as r:
             with open(tmp_path, "wb") as f:
                 for chunk in r.iter_bytes(chunk_size=8192):
                     f.write(chunk)
-        model = whisper.load_model(whisper_model)
-        result = model.transcribe(tmp_path, fp16=False)
+        if whisper_model not in _whisper_models:
+            log.info(f"Loading Whisper model '{whisper_model}'...")
+            _whisper_models[whisper_model] = whisper.load_model(whisper_model)
+        result = _whisper_models[whisper_model].transcribe(tmp_path, fp16=False)
         return result["text"][:12000]
     except Exception as e:
         log.error(f"Transcription failed for {title}: {e}")
@@ -347,6 +355,7 @@ def run(dry_run=False):
             results.append(item)
             summaries_only.append(summary)
             mark_seen(conn, item["url"])
+    conn.commit()  # single commit for all mark_seen calls
 
     # 3. Rollup
     rollup = generate_rollup(summaries_only, rollup_prompt, s["model"])
