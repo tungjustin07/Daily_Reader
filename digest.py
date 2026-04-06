@@ -15,9 +15,11 @@ import os
 import re
 import sqlite3
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import anthropic as anthropic_lib
 import feedparser
 import httpx
 import yaml
@@ -183,7 +185,7 @@ def transcribe_audio(audio_url: str, title: str, whisper_model: str) -> str:
 # SUMMARIZE
 # ─────────────────────────────────────────────────────────────────────────────
 
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 def build_prompts(persona: str) -> tuple[str, str, str]:
     article_prompt = f"""Summarize the following article for {persona}.
@@ -216,7 +218,7 @@ Summaries:
     return article_prompt, podcast_prompt, rollup_prompt
 
 
-def summarize(item: dict, article_prompt: str, podcast_prompt: str, model: str) -> str | None:
+def summarize(item: dict, article_prompt: str, podcast_prompt: str, model: str):
     template = podcast_prompt if item["type"] == "podcast" else article_prompt
     try:
         msg = client.messages.create(
@@ -245,10 +247,146 @@ def generate_rollup(summaries: list[str], rollup_prompt: str, model: str) -> str
         return ""
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TWITTER SECTION (weekly, Sundays only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+TWITTER_BATCH_SIZE   = 10
+TWITTER_BATCH_DELAY  = 5        # seconds between search batches
+TWITTER_SEARCH_MODEL = "claude-haiku-4-5-20251001"
+TWITTER_MAX_SEARCHES = 8        # web_search uses per batch call
+
+
+def _twitter_search_batch(people_batch: list[dict], since_date: str) -> str:
+    handles = ", ".join(f"@{p['handle']}" for p in people_batch)
+    names   = ", ".join(p["name"] for p in people_batch)
+    prompt  = f"""Search Twitter/X for recent posts (since {since_date}) from these users:
+{handles}
+({names})
+
+Find their most interesting, substantive tweets from the past week.
+For each tweet report: Author name, @handle, full tweet text, date.
+Focus on ideas, analysis, opinions, research. Skip retweets and announcements.
+Omit anyone with no recent activity."""
+
+    for attempt in range(3):
+        try:
+            response = client.messages.create(
+                model=TWITTER_SEARCH_MODEL,
+                max_tokens=4000,
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": TWITTER_MAX_SEARCHES}],
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return "".join(b.text for b in response.content if hasattr(b, "text"))
+        except anthropic_lib.RateLimitError:
+            wait = 60 * (attempt + 1)
+            log.warning(f"Twitter batch rate limited — waiting {wait}s (attempt {attempt + 1}/3)")
+            time.sleep(wait)
+        except (anthropic_lib.AuthenticationError, anthropic_lib.BadRequestError) as e:
+            log.error(f"Twitter batch non-retryable error: {e}")
+            return ""
+    log.error("Twitter batch: rate limit retries exhausted")
+    return ""
+
+
+def gather_hashtag_section(since_date: str) -> str:
+    """Top 10 most engaged tweets for work-relevant hashtags in the past day."""
+    try:
+        from twitter_people import HASHTAGS
+    except ImportError:
+        return ""
+    tags = " OR ".join(HASHTAGS)
+    prompt = f"""Search Twitter/X for the most engaged tweets (high likes + retweets) since {since_date} using these hashtags: {tags}
+
+Find the top 10 most engaging, substantive tweets. For each report: author @handle, tweet text, approximate engagement, hashtag.
+Prioritize original insights, data points, frameworks, bold takes. Skip pure self-promotion."""
+
+    for attempt in range(3):
+        try:
+            response = client.messages.create(
+                model=TWITTER_SEARCH_MODEL,
+                max_tokens=3000,
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = "".join(b.text for b in response.content if hasattr(b, "text"))
+            if not raw.strip():
+                return ""
+            summary = client.messages.create(
+                model=TWITTER_SEARCH_MODEL,
+                max_tokens=2000,
+                messages=[{"role": "user", "content": f"""Format these top tweets as clean HTML for an email digest.
+
+<tweets>
+{raw}
+</tweets>
+
+Output a numbered list of top 10. Each entry:
+<p><strong>1. @handle</strong> — "Tweet text" <em>(~1.2k likes · #RevOps)</em></p>
+Use only <p>, <strong>, <em>. Start directly with item 1."""}],
+            )
+            return "".join(b.text for b in summary.content if hasattr(b, "text"))
+        except anthropic_lib.RateLimitError:
+            wait = 60 * (attempt + 1)
+            log.warning(f"Hashtag search rate limited — waiting {wait}s")
+            time.sleep(wait)
+        except (anthropic_lib.AuthenticationError, anthropic_lib.BadRequestError) as e:
+            log.error(f"Hashtag search non-retryable error: {e}")
+            return ""
+    return ""
+
+
+def gather_twitter_section(since_date: str) -> str:
+    try:
+        from twitter_people import PEOPLE
+    except ImportError:
+        log.warning("twitter_people.py not found — skipping twitter section")
+        return ""
+
+    batches = [PEOPLE[i:i + TWITTER_BATCH_SIZE] for i in range(0, len(PEOPLE), TWITTER_BATCH_SIZE)]
+    raw_parts = []
+    for i, batch in enumerate(batches, 1):
+        log.info(f"Twitter search batch {i}/{len(batches)}")
+        result = _twitter_search_batch(batch, since_date)
+        if result.strip():
+            raw_parts.append(result)
+        if i < len(batches):
+            time.sleep(TWITTER_BATCH_DELAY)
+
+    if not raw_parts:
+        log.warning("No tweets found — omitting twitter section")
+        return ""
+
+    raw = "\n\n---\n\n".join(raw_parts)
+    log.info("Summarizing tweets by theme...")
+    try:
+        response = client.messages.create(
+            model=TWITTER_SEARCH_MODEL,
+            max_tokens=5000,
+            messages=[{"role": "user", "content": f"""These are tweets from the past week from a curated list of thinkers, founders, and researchers:
+
+<tweets>
+{raw}
+</tweets>
+
+Create a digest organized into 5–8 themes (e.g. AI/Tech, Economics, Science, Society, Ideas).
+For each theme:
+1. Bold thematic title
+2. 3–6 standout tweets as:
+   <blockquote>"Tweet text"<br><em>— Name (@handle)</em></blockquote>
+Only include genuinely interesting content. Output clean HTML using only <h2>, <p>, <blockquote>, <br>, <em>, <strong>.
+Start directly with the first <h2> — no preamble."""}],
+        )
+        return "".join(b.text for b in response.content if hasattr(b, "text"))
+    except Exception as e:
+        log.error(f"Twitter summarization failed: {e}")
+        return ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # RENDER EMAIL
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_html(items: list[dict], rollup: str) -> str:
+def render_html(items: list[dict], rollup: str, twitter_section: str = "", hashtag_section: str = "") -> str:
     today = datetime.now().strftime("%A, %B %-d")
     sections = ""
     for item in items:
@@ -273,6 +411,29 @@ def render_html(items: list[dict], rollup: str) -> str:
           <p style="margin:0;font-size:14px;line-height:1.7;color:#333">{rollup}</p>
         </div>"""
 
+    twitter_block = ""
+    if twitter_section:
+        twitter_block = f"""
+        <div style="margin-bottom:28px;padding:20px 24px;background:#f8f9ff;border-radius:8px;border:1px solid #e8ecff">
+          <p style="margin:0 0 16px;font-size:11px;font-weight:700;color:#5a6ef7;text-transform:uppercase;letter-spacing:.1em">🐦 This Week on Twitter</p>
+          <style>
+            .tw h2{{font-size:15px;font-weight:700;color:#1a1a1a;margin:20px 0 8px;padding-bottom:4px;border-bottom:1px solid #dde1f5}}
+            .tw h2:first-child{{margin-top:0}}
+            .tw blockquote{{margin:8px 0;padding:10px 14px;background:#fff;border-left:3px solid #5a6ef7;border-radius:0 6px 6px 0;font-size:13px;line-height:1.6;color:#222}}
+            .tw blockquote em{{font-style:normal;font-size:12px;color:#999}}
+            .tw p{{margin:6px 0;font-size:13px;color:#555}}
+          </style>
+          <div class="tw">{twitter_section}</div>
+        </div>"""
+
+    hashtag_block = ""
+    if hashtag_section:
+        hashtag_block = f"""
+        <div style="margin-bottom:28px;padding:16px 20px;background:#f8fff8;border-radius:8px;border:1px solid #d4edda">
+          <p style="margin:0 0 12px;font-size:11px;font-weight:700;color:#2d6a4f;text-transform:uppercase;letter-spacing:.1em">🔥 Trending in RevOps / GTM / SaaS</p>
+          {hashtag_section}
+        </div>"""
+
     return f"""<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f4f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
     <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)">
       <div style="background:#1a1a1a;padding:28px 32px">
@@ -280,16 +441,24 @@ def render_html(items: list[dict], rollup: str) -> str:
         <h1 style="margin:4px 0 0;font-size:24px;font-weight:700;color:#fff">{today}</h1>
         <p style="margin:6px 0 0;font-size:13px;color:#aaa">{len(items)} items · AI-summarized</p>
       </div>
-      <div style="padding:32px">{rollup_section}{sections}
+      <div style="padding:32px">{rollup_section}{twitter_block}{hashtag_block}{sections}
         <p style="margin:0;font-size:11px;color:#bbb;text-align:center">Your daily digest</p>
       </div>
     </div></body></html>"""
 
-def render_text(items: list[dict], rollup: str) -> str:
+def render_text(items: list[dict], rollup: str, twitter_section: str = "", hashtag_section: str = "") -> str:
     today = datetime.now().strftime("%A, %B %-d")
     lines = [f"DAILY DIGEST — {today}", "=" * 50, ""]
     if rollup:
         lines += ["BIG PICTURE", rollup, "", "-" * 50, ""]
+    if twitter_section:
+        clean = re.sub(r"<[^>]+>", " ", twitter_section)
+        clean = re.sub(r"\s{2,}", " ", clean).strip()
+        lines += ["THIS WEEK ON TWITTER", clean, "", "-" * 50, ""]
+    if hashtag_section:
+        clean = re.sub(r"<[^>]+>", " ", hashtag_section)
+        clean = re.sub(r"\s{2,}", " ", clean).strip()
+        lines += ["🔥 TRENDING IN REVOPS / GTM / SAAS", clean, "", "-" * 50, ""]
     for item in items:
         lines += [item["source"].upper(), item["title"], item["url"], "", item["summary"], "", "-" * 50, ""]
     return "\n".join(lines)
@@ -360,11 +529,21 @@ def run(dry_run=False):
     # 3. Rollup
     rollup = generate_rollup(summaries_only, rollup_prompt, s["model"])
 
+    # 3b. Twitter people section (daily)
+    since = (datetime.now() - timedelta(days=s.get("twitter_lookback_days", 1))).strftime("%Y-%m-%d")
+    log.info(f"Fetching twitter section since {since}")
+    twitter_section = gather_twitter_section(since)
+
+    # 3c. Hashtag trending section (always past 24h)
+    since_yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    log.info("Fetching trending hashtag tweets...")
+    hashtag_section = gather_hashtag_section(since_yesterday)
+
     # 4. Render + send
-    today = datetime.now().strftime("%a %b %-d")
-    subject = f"Your digest — {today} ({len(results)} items)"
-    html = render_html(results, rollup)
-    text = render_text(results, rollup)
+    today = datetime.now().strftime("%b %-d, %Y")
+    subject = f"Daily RSS + Twitter Digest - {today}"
+    html = render_html(results, rollup, twitter_section, hashtag_section)
+    text = render_text(results, rollup, twitter_section, hashtag_section)
 
     if dry_run:
         print(text)

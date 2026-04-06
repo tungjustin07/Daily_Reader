@@ -12,6 +12,9 @@ settings:
  
   # Summarization persona — change this to fit your role
   persona: "a senior RevOps and GTM consultant who advises B2B SaaS companies"
+
+  # Twitter section — runs daily with a 1-day lookback.
+  twitter_lookback_days: 1
  
 sources:
  

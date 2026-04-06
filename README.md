@@ -1,72 +1,105 @@
 # Daily Reader
 
-A daily email digest that fetches RSS feeds and podcast transcripts, summarizes them with Claude, and emails you a clean briefing every morning.
+A personal AI digest that runs every morning and emails a summary of RSS feeds, podcasts, and Twitter — all in one email.
 
 ## What it does
 
-- Fetches new articles from RSS/Substack sources published in the last 24 hours
-- Downloads and transcribes podcast episodes via Whisper
-- Summarizes each item with Claude Haiku (TL;DR + key points + why it matters)
-- Generates a "Big Picture" rollup connecting themes across all items
-- Sends a formatted HTML email via Resend
-- Tracks seen URLs in a local SQLite DB to avoid duplicates
+Runs daily at 7am PT via GitHub Actions:
+
+1. **RSS / blogs** — fetches new articles from configured sources, pulls full text via Jina, summarizes each with Claude
+2. **Podcasts** — downloads new episodes, transcribes with Whisper, summarizes
+3. **Twitter people** — searches recent tweets from a curated list of ~90 thinkers, founders, and SV influencers; groups by theme (AI, Economics, Ideas, etc.)
+4. **Trending hashtags** — finds the top 10 most engaged tweets from the past 24h across `#RevOps #GTM #SaaS #B2BGrowth #AIforBusiness` and related tags
+5. **Big picture rollup** — one paragraph connecting themes across all content
+6. Sends a single HTML email via Resend
+
+## Email layout
+
+```
+🧠 Big picture rollup
+🐦 This Week on Twitter  (curated people, by theme)
+🔥 Trending in RevOps / GTM / SaaS  (top hashtag tweets)
+📄 RSS articles + 🎙 Podcast summaries
+```
 
 ## Setup
 
-**1. Install dependencies**
-```bash
-pip install -r requirements.txt
-brew install ffmpeg  # required for podcast transcription
-```
+### 1. Clone and configure sources
 
-**2. Create `.env`**
-```
-ANTHROPIC_API_KEY=...
-RESEND_API_KEY=...
-EMAIL_FROM=digest@yourdomain.com
-EMAIL_TO=you@gmail.com
-```
-
-**3. Edit `config.yaml`** to add your sources and set your persona.
-
-**4. Run**
-```bash
-python digest.py --dry-run   # print to terminal, no email
-python digest.py             # full run + send email
-```
-
-## Adding sources
-
-In `config.yaml`, add an entry under `sources`:
+Edit `config.yaml` to add/remove RSS feeds and podcasts. No code changes needed — just edit the YAML and push.
 
 ```yaml
-- name: My Newsletter
-  type: rss          # or: podcast
-  url: https://example.substack.com/feed
-  tags: [gtm, ai]
+settings:
+  lookback_hours: 24
+  max_items_per_source: 3
+  model: claude-haiku-4-5-20251001
+  persona: "a senior RevOps and GTM consultant..."
+  twitter_lookback_days: 1
+
+sources:
+  - name: Lenny's Newsletter
+    type: rss
+    url: https://www.lennysnewsletter.com/feed
+
+  - name: All-In
+    type: podcast
+    url: https://allinchamathjason.libsyn.com/rss
 ```
 
-Common RSS URL patterns:
-- Substack: `https://<name>.substack.com/feed`
-- Ghost: `https://<site>/rss/`
-- WordPress: `https://<site>/feed/`
+To add a new source, copy any block, update `name`/`url`, commit and push.
 
-Commit and push — the next scheduled run picks it up automatically.
+**Finding RSS feeds:**
+- Substack → `https://<name>.substack.com/feed`
+- Ghost → `https://<site>/rss/`
+- WordPress → `https://<site>/feed/`
 
-## Configuration
+### 2. Edit the Twitter people list
 
-All settings live in `config.yaml`:
+`twitter_people.py` contains two lists:
+- `COLLISON_LIST` — Patrick Collison's curated thinkers/researchers
+- `SV_INFLUENCERS` — high-engagement SV founders, AI leaders, GTM practitioners
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `lookback_hours` | 24 | How far back to fetch items |
-| `max_items_per_source` | 3 | Cap per source to keep email manageable |
-| `model` | `claude-haiku-4-5-20251001` | Swap to `claude-sonnet-4-6` for better summaries |
-| `whisper_model` | `base` | `tiny` / `base` / `small` — transcription quality vs speed |
-| `persona` | RevOps consultant | Shapes summarization tone and relevance filter |
+Edit either list to add/remove handles. Also edit `HASHTAGS` to change which tags are monitored for trending content.
 
-## GitHub Actions
+### 3. GitHub Secrets
 
-The workflow runs daily at 7am PT (14:00 UTC). Trigger manually from the Actions tab anytime.
+Add these four secrets to your repo (Settings → Secrets → Actions):
 
-Required secrets: `ANTHROPIC_API_KEY`, `RESEND_API_KEY`, `EMAIL_FROM`, `EMAIL_TO`
+| Secret | Description |
+|--------|-------------|
+| `ANTHROPIC_API_KEY` | Anthropic API key (needs web_search tool access) |
+| `RESEND_API_KEY` | Resend API key for email delivery |
+| `EMAIL_FROM` | Sender address (must be a verified Resend domain) |
+| `EMAIL_TO` | Your email address |
+
+### 4. Enable the workflow
+
+The workflow runs automatically at 7am PT daily. You can also trigger it manually from the Actions tab.
+
+## Local development
+
+```bash
+# Install deps
+pip install -r requirements.txt
+
+# Create .env with your keys
+cp .env.example .env   # then fill in values
+
+# Test without sending email
+python digest.py --dry-run
+
+# Full run (sends email)
+python digest.py
+```
+
+## Stack
+
+- **Claude Haiku** — article summarization, Twitter search + theming, hashtag trending
+- **Whisper** — podcast transcription (runs in GitHub Actions with ffmpeg)
+- **Jina** — full-text article extraction from URLs
+- **Resend** — transactional email delivery
+- **GitHub Actions** — daily cron scheduling, SQLite deduplication committed back to repo
+
+## Deduplication
+
+Already-seen article URLs are stored in `digest.db` (SQLite). The workflow commits this file back to the repo after each run so deduplication persists across runs.
