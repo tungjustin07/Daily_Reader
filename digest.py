@@ -32,7 +32,7 @@ _http = httpx.Client(timeout=httpx.Timeout(20.0, read=60.0), follow_redirects=Tr
 # Whisper model cache — load once per model name per process
 _whisper_models: dict = {}
 
-load_dotenv()
+load_dotenv(override=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LOAD CONFIG
@@ -185,7 +185,7 @@ def transcribe_audio(audio_url: str, title: str, whisper_model: str) -> str:
 # SUMMARIZE
 # ─────────────────────────────────────────────────────────────────────────────
 
-client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+client: Anthropic = None  # initialized in run() after dotenv loads
 
 def build_prompts(persona: str) -> tuple[str, str, str]:
     article_prompt = f"""Summarize the following article for {persona}.
@@ -250,23 +250,31 @@ def generate_rollup(summaries: list[str], rollup_prompt: str, model: str) -> str
 # TWITTER SECTION (weekly, Sundays only)
 # ─────────────────────────────────────────────────────────────────────────────
 
-TWITTER_BATCH_SIZE   = 10
-TWITTER_BATCH_DELAY  = 5        # seconds between search batches
-TWITTER_SEARCH_MODEL = "claude-haiku-4-5-20251001"
-TWITTER_MAX_SEARCHES = 8        # web_search uses per batch call
+TWITTER_BATCH_SIZE    = 5        # fewer people per batch → more focused searches
+TWITTER_BATCH_DELAY   = 3        # seconds between search batches
+TWITTER_SEARCH_MODEL  = "claude-sonnet-4-6"   # Sonnet for reliable tool use
+TWITTER_SUMMARY_MODEL = "claude-haiku-4-5-20251001"  # Haiku for cheap summarization
+TWITTER_MAX_SEARCHES  = 6        # web_search uses per batch call
 
 
 def _twitter_search_batch(people_batch: list[dict], since_date: str) -> str:
-    handles = ", ".join(f"@{p['handle']}" for p in people_batch)
-    names   = ", ".join(p["name"] for p in people_batch)
-    prompt  = f"""Search Twitter/X for recent posts (since {since_date}) from these users:
-{handles}
-({names})
+    lines = []
+    for p in people_batch:
+        lines.append(f'- {p["name"]} (@{p["handle"]}): search for \'{p["name"]} site:x.com\' OR \'@{p["handle"]} tweet {since_date[:7]}\'')
+    search_instructions = "\n".join(lines)
+    prompt = f"""You MUST use the web_search tool for each of the following people to find their real, recent posts on X/Twitter since {since_date}.
 
-Find their most interesting, substantive tweets from the past week.
-For each tweet report: Author name, @handle, full tweet text, date.
-Focus on ideas, analysis, opinions, research. Skip retweets and announcements.
-Omit anyone with no recent activity."""
+For each person below, run a web search and report any actual post content you find:
+{search_instructions}
+
+IMPORTANT:
+- Use web_search tool NOW — do not answer from memory or training data
+- Report only actual post text found in search results, with the author name and @handle
+- Include the date if visible
+- Skip retweets, replies, or purely promotional content
+- If a search returns no tweet content for someone, move on
+- Format: "**Name (@handle)** — [post text] (date if known)"
+"""
 
     for attempt in range(3):
         try:
@@ -294,11 +302,18 @@ def gather_hashtag_section(since_date: str) -> str:
         from twitter_people import HASHTAGS
     except ImportError:
         return ""
-    tags = " OR ".join(HASHTAGS)
-    prompt = f"""Search Twitter/X for the most engaged tweets (high likes + retweets) since {since_date} using these hashtags: {tags}
+    tags_str = " OR ".join(HASHTAGS)
+    tag_list = " ".join(HASHTAGS)
+    prompt = f"""Use the web_search tool to find highly engaged tweets posted since {since_date} about RevOps, GTM, SaaS, and B2B growth.
 
-Find the top 10 most engaging, substantive tweets. For each report: author @handle, tweet text, approximate engagement, hashtag.
-Prioritize original insights, data points, frameworks, bold takes. Skip pure self-promotion."""
+Run searches like:
+- "{tag_list} tweets {since_date[:7]}"
+- "top tweets {tags_str}"
+- site:x.com OR site:twitter.com {tags_str}
+
+IMPORTANT: Use web_search tool now. Report actual tweet content found in search results.
+For each tweet: @handle, tweet text, any engagement info visible, relevant hashtag.
+Find 8-10 substantive posts with original insights, data, frameworks, or bold takes. Skip pure self-promotion."""
 
     for attempt in range(3):
         try:
@@ -312,7 +327,7 @@ Prioritize original insights, data points, frameworks, bold takes. Skip pure sel
             if not raw.strip():
                 return ""
             summary = client.messages.create(
-                model=TWITTER_SEARCH_MODEL,
+                model=TWITTER_SUMMARY_MODEL,
                 max_tokens=2000,
                 messages=[{"role": "user", "content": f"""Format these top tweets as clean HTML for an email digest.
 
@@ -320,9 +335,9 @@ Prioritize original insights, data points, frameworks, bold takes. Skip pure sel
 {raw}
 </tweets>
 
-Output a numbered list of top 10. Each entry:
+Output a numbered list of top 10 (or fewer if less found). Each entry:
 <p><strong>1. @handle</strong> — "Tweet text" <em>(~1.2k likes · #RevOps)</em></p>
-Use only <p>, <strong>, <em>. Start directly with item 1."""}],
+Use only <p>, <strong>, <em>. Start directly with item 1. If the input contains no real tweets, output an empty string."""}],
             )
             return "".join(b.text for b in summary.content if hasattr(b, "text"))
         except anthropic_lib.RateLimitError:
@@ -342,7 +357,7 @@ def gather_twitter_section(since_date: str) -> str:
         log.warning("twitter_people.py not found — skipping twitter section")
         return ""
 
-    batches = [PEOPLE[i:i + TWITTER_BATCH_SIZE] for i in range(0, len(PEOPLE), TWITTER_BATCH_SIZE)]
+    batches = [PEOPLE[i:i + TWITTER_BATCH_SIZE] for i in range(0, len(PEOPLE), TWITTER_BATCH_SIZE)][:10]
     raw_parts = []
     for i, batch in enumerate(batches, 1):
         log.info(f"Twitter search batch {i}/{len(batches)}")
@@ -360,7 +375,7 @@ def gather_twitter_section(since_date: str) -> str:
     log.info("Summarizing tweets by theme...")
     try:
         response = client.messages.create(
-            model=TWITTER_SEARCH_MODEL,
+            model=TWITTER_SUMMARY_MODEL,
             max_tokens=5000,
             messages=[{"role": "user", "content": f"""These are tweets from the past week from a curated list of thinkers, founders, and researchers:
 
@@ -491,6 +506,9 @@ def send_email(subject: str, html: str, text: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run(dry_run=False):
+    global client
+    client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
     cfg = load_config()
     s = cfg["settings"]
     sources = cfg["sources"]
@@ -511,11 +529,21 @@ def run(dry_run=False):
             log.error(f"Source '{source['name']}' failed: {e}")
 
     log.info(f"Fetched {len(raw_items)} new items")
-    if not raw_items:
+
+    # 2. Twitter + hashtag sections (run regardless of RSS)
+    since = (datetime.now() - timedelta(days=s.get("twitter_lookback_days", 1))).strftime("%Y-%m-%d")
+    log.info(f"Fetching twitter section since {since}")
+    twitter_section = gather_twitter_section(since)
+
+    since_yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    log.info("Fetching trending hashtag tweets...")
+    hashtag_section = gather_hashtag_section(since_yesterday)
+
+    if not raw_items and not twitter_section and not hashtag_section:
         log.info("Nothing new — skipping email")
         return
 
-    # 2. Summarize
+    # 3. Summarize RSS items
     results, summaries_only = [], []
     for item in raw_items:
         summary = summarize(item, article_prompt, podcast_prompt, s["model"])
@@ -526,18 +554,8 @@ def run(dry_run=False):
             mark_seen(conn, item["url"])
     conn.commit()  # single commit for all mark_seen calls
 
-    # 3. Rollup
+    # 4. Rollup
     rollup = generate_rollup(summaries_only, rollup_prompt, s["model"])
-
-    # 3b. Twitter people section (daily)
-    since = (datetime.now() - timedelta(days=s.get("twitter_lookback_days", 1))).strftime("%Y-%m-%d")
-    log.info(f"Fetching twitter section since {since}")
-    twitter_section = gather_twitter_section(since)
-
-    # 3c. Hashtag trending section (always past 24h)
-    since_yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    log.info("Fetching trending hashtag tweets...")
-    hashtag_section = gather_hashtag_section(since_yesterday)
 
     # 4. Render + send
     today = datetime.now().strftime("%b %-d, %Y")
