@@ -120,5 +120,5 @@ HASHTAGS = [
     "#ProductLed",
 ]
 
-# Combined list used by default
-PEOPLE = COLLISON_LIST + SV_INFLUENCERS
+# SV_INFLUENCERS first so they're always in the first batches (capped at 10 batches of 5)
+PEOPLE = SV_INFLUENCERS + COLLISON_LIST
