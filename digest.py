@@ -385,10 +385,15 @@ def gather_twitter_section(since_date: str) -> str:
 
 Create a digest organized into 5–8 themes (e.g. AI/Tech, Economics, Science, Society, Ideas).
 For each theme:
-1. Bold thematic title
-2. 3–6 standout tweets as:
-   <blockquote>"Tweet text"<br><em>— Name (@handle)</em></blockquote>
-Only include genuinely interesting content. Output clean HTML using only <h2>, <p>, <blockquote>, <br>, <em>, <strong>.
+1. Bold thematic title as <h2>
+2. A 2–4 sentence paragraph summarizing the key ideas and discussions in that category — do NOT quote tweets directly, write in your own words
+3. End with: <p><em>Most interesting voice: Name (@handle) — one sentence on why their take stood out</em></p>
+
+Rules:
+- If a person posted multiple tweets on the same topic, combine them into one summary
+- Never show raw tweet text
+- Only include genuinely interesting content
+- Output clean HTML using only <h2>, <p>, <em>, <strong>
 Start directly with the first <h2> — no preamble."""}],
         )
         return "".join(b.text for b in response.content if hasattr(b, "text"))
