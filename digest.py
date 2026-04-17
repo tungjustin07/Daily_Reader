@@ -252,7 +252,7 @@ def generate_rollup(summaries: list[str], rollup_prompt: str, model: str) -> str
 
 TWITTER_BATCH_SIZE    = 5        # fewer people per batch → more focused searches
 TWITTER_BATCH_DELAY   = 3        # seconds between search batches
-TWITTER_SEARCH_MODEL  = "claude-sonnet-4-6"   # Sonnet for reliable tool use
+TWITTER_SEARCH_MODEL  = "claude-haiku-4-5-20251001"   # Haiku for cheaper tool use
 TWITTER_SUMMARY_MODEL = "claude-haiku-4-5-20251001"  # Haiku for cheap summarization
 TWITTER_MAX_SEARCHES  = 6        # web_search uses per batch call
 
