@@ -98,15 +98,15 @@ sources:
   # "top?t=day" surfaces the highest-upvoted posts from the past 24 hours —
   # ideal for a daily digest. Swap "top" for "hot" to get real-time trending.
 
-  - name: r/Fitness
+  - name: r/gtmengineering
     type: rss
-    url: https://www.reddit.com/r/Fitness/top/.rss?t=day
-    tags: [health, fitness]
+    url: https://www.reddit.com/r/gtmengineering/top/.rss?t=day
+    tags: [gtm, engineering]
 
-  - name: r/engineering
+  - name: r/ClaudeCode
     type: rss
-    url: https://www.reddit.com/r/engineering/top/.rss?t=day
-    tags: [engineering, tech]
+    url: https://www.reddit.com/r/ClaudeCode/top/.rss?t=day
+    tags: [ai, tools]
 
   # ── To add a new source ───────────────────────
   # Just copy any block above, update name/url/tags, commit, push.
