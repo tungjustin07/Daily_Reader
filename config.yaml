@@ -93,10 +93,26 @@ sources:
     url: https://thegtmnewsletter.substack.com/feed
     tags: [gtm, sales]
  
+  # ── Reddit (RSS, no auth required) ───────────
+  # Pattern: https://www.reddit.com/r/<subreddit>/top/.rss?t=day
+  # "top?t=day" surfaces the highest-upvoted posts from the past 24 hours —
+  # ideal for a daily digest. Swap "top" for "hot" to get real-time trending.
+
+  - name: r/Fitness
+    type: rss
+    url: https://www.reddit.com/r/Fitness/top/.rss?t=day
+    tags: [health, fitness]
+
+  - name: r/engineering
+    type: rss
+    url: https://www.reddit.com/r/engineering/top/.rss?t=day
+    tags: [engineering, tech]
+
   # ── To add a new source ───────────────────────
   # Just copy any block above, update name/url/tags, commit, push.
   # Finding RSS feeds:
   #   Substack  → https://<name>.substack.com/feed
   #   Ghost     → https://<site>/rss/
   #   WordPress → https://<site>/feed/
+  #   Reddit    → https://www.reddit.com/r/<subreddit>/top/.rss?t=day
   #   Other     → try /feed, /rss, /rss.xml, /atom.xml
