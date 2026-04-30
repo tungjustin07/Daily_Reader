@@ -93,19 +93,22 @@ sources:
     url: https://thegtmnewsletter.substack.com/feed
     tags: [gtm, sales]
  
-  # ── Reddit (RSS, no auth required) ───────────
-  # Pattern: https://www.reddit.com/r/<subreddit>/top/.rss?t=day
-  # "top?t=day" surfaces the highest-upvoted posts from the past 24 hours —
-  # ideal for a daily digest. Swap "top" for "hot" to get real-time trending.
+  # ── Reddit (native JSON API, no auth required) ─
+  # Uses Reddit's public .json endpoint so we can rank by score+comments
+  # and pull selftext directly (Jina is blocked by Reddit).
+  # Picks the top-ranked posts by (score + num_comments).
+  # Fields: subreddit, time (day|week|month)
 
   - name: r/gtmengineering
-    type: rss
-    url: https://www.reddit.com/r/gtmengineering/top/.rss?t=day
+    type: reddit
+    subreddit: gtmengineering
+    time: day
     tags: [gtm, engineering]
 
   - name: r/ClaudeCode
-    type: rss
-    url: https://www.reddit.com/r/ClaudeCode/top/.rss?t=day
+    type: reddit
+    subreddit: ClaudeCode
+    time: day
     tags: [ai, tools]
 
   # ── To add a new source ───────────────────────

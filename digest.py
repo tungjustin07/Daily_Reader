@@ -128,6 +128,70 @@ def fetch_rss_items(source: dict, cutoff: datetime, conn, max_items: int) -> lis
             break
     return items
 
+def fetch_reddit_items(source: dict, cutoff: datetime, conn, max_items: int) -> list[dict]:
+    subreddit = source.get("subreddit") or source["name"].lstrip("r/").lstrip("/")
+    time_window = source.get("time", "day")
+    log.info(f"Fetching reddit: r/{subreddit} (top/{time_window})")
+
+    api_url = f"https://www.reddit.com/r/{subreddit}/top.json?t={time_window}&limit={max(max_items, 3)}"
+    headers = {"User-Agent": "daily-reader/1.0 by tungjustin"}
+    try:
+        resp = _http.get(api_url, headers=headers)
+        if resp.status_code != 200:
+            log.warning(f"Reddit returned {resp.status_code} for r/{subreddit}")
+            return []
+        data = resp.json()
+    except Exception as e:
+        log.warning(f"Reddit fetch failed for r/{subreddit}: {e}")
+        return []
+
+    candidates = []
+    for child in data.get("data", {}).get("children", []):
+        post = child.get("data", {})
+        if post.get("stickied") or post.get("over_18"):
+            continue
+        created = post.get("created_utc")
+        if created:
+            created_dt = datetime.fromtimestamp(created, tz=timezone.utc)
+            if created_dt < cutoff:
+                continue
+        candidates.append(post)
+
+    candidates.sort(
+        key=lambda p: (p.get("score", 0) + p.get("num_comments", 0), p.get("score", 0)),
+        reverse=True,
+    )
+
+    items = []
+    for post in candidates:
+        permalink = "https://www.reddit.com" + post.get("permalink", "")
+        if is_seen(conn, permalink):
+            continue
+        score = post.get("score", 0)
+        num_comments = post.get("num_comments", 0)
+        title = post.get("title", "Untitled")
+        if post.get("is_self"):
+            body = post.get("selftext", "").strip()
+            if not body:
+                continue
+        else:
+            link_url = post.get("url", "")
+            body = fetch_full_text(link_url) if link_url else ""
+            if not body:
+                continue
+
+        body = f"[Reddit r/{subreddit} — score: {score}, comments: {num_comments}]\n\n{body}"
+        items.append({
+            "source": source["name"],
+            "title":  title,
+            "url":    permalink,
+            "body":   body,
+            "type":   "article",
+        })
+        if len(items) >= max_items:
+            break
+    return items
+
 def fetch_podcast_items(source: dict, cutoff: datetime, conn, max_items: int, whisper_model: str) -> list[dict]:
     log.info(f"Fetching podcast: {source['name']}")
     feed = feedparser.parse(source["url"])
@@ -528,6 +592,8 @@ def run(dry_run=False):
         try:
             if source["type"] == "podcast":
                 raw_items += fetch_podcast_items(source, cutoff, conn, s["max_items_per_source"], s["whisper_model"])
+            elif source["type"] == "reddit":
+                raw_items += fetch_reddit_items(source, cutoff, conn, s["max_items_per_source"])
             else:
                 raw_items += fetch_rss_items(source, cutoff, conn, s["max_items_per_source"])
         except Exception as e:
