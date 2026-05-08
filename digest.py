@@ -1,5 +1,5 @@
 """
-Daily Digest — fetch, summarize, email.
+Weekly Digest — fetch, summarize, email.
 
 Config lives in config.yaml. This file rarely needs editing.
 
@@ -361,7 +361,7 @@ IMPORTANT:
 
 
 def gather_hashtag_section(since_date: str) -> str:
-    """Top 10 most engaged tweets for work-relevant hashtags in the past day."""
+    """Top 10 most engaged tweets for work-relevant hashtags in the past week."""
     try:
         from twitter_people import HASHTAGS
     except ImportError:
@@ -521,18 +521,18 @@ def render_html(items: list[dict], rollup: str, twitter_section: str = "", hasht
     return f"""<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f4f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
     <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)">
       <div style="background:#1a1a1a;padding:28px 32px">
-        <p style="margin:0;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.1em">Daily Digest</p>
+        <p style="margin:0;font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.1em">Weekly Digest</p>
         <h1 style="margin:4px 0 0;font-size:24px;font-weight:700;color:#fff">{today}</h1>
         <p style="margin:6px 0 0;font-size:13px;color:#aaa">{len(items)} items · AI-summarized</p>
       </div>
       <div style="padding:32px">{rollup_section}{twitter_block}{hashtag_block}{sections}
-        <p style="margin:0;font-size:11px;color:#bbb;text-align:center">Your daily digest</p>
+        <p style="margin:0;font-size:11px;color:#bbb;text-align:center">Your weekly digest</p>
       </div>
     </div></body></html>"""
 
 def render_text(items: list[dict], rollup: str, twitter_section: str = "", hashtag_section: str = "") -> str:
     today = datetime.now().strftime("%A, %B %-d")
-    lines = [f"DAILY DIGEST — {today}", "=" * 50, ""]
+    lines = [f"WEEKLY DIGEST — {today}", "=" * 50, ""]
     if rollup:
         lines += ["BIG PICTURE", rollup, "", "-" * 50, ""]
     if twitter_section:
@@ -602,13 +602,13 @@ def run(dry_run=False):
     log.info(f"Fetched {len(raw_items)} new items")
 
     # 2. Twitter + hashtag sections (run regardless of RSS)
-    since = (datetime.now() - timedelta(days=s.get("twitter_lookback_days", 1))).strftime("%Y-%m-%d")
+    since = (datetime.now() - timedelta(days=s.get("twitter_lookback_days", 7))).strftime("%Y-%m-%d")
     log.info(f"Fetching twitter section since {since}")
     twitter_section = gather_twitter_section(since)
 
-    since_yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    since_week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
     log.info("Fetching trending hashtag tweets...")
-    hashtag_section = gather_hashtag_section(since_yesterday)
+    hashtag_section = gather_hashtag_section(since_week_ago)
 
     if not raw_items and not twitter_section and not hashtag_section:
         log.info("Nothing new — skipping email")
@@ -630,7 +630,7 @@ def run(dry_run=False):
 
     # 4. Render + send
     today = datetime.now().strftime("%b %-d, %Y")
-    subject = f"Daily RSS + Twitter Digest - {today}"
+    subject = f"Weekly RSS + Twitter Digest - {today}"
     html = render_html(results, rollup, twitter_section, hashtag_section)
     text = render_text(results, rollup, twitter_section, hashtag_section)
 

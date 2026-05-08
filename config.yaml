@@ -1,20 +1,20 @@
 # ─────────────────────────────────────────────
-# Daily Digest — source configuration
+# Weekly Digest — source configuration
 # Edit this file to add/remove sources.
 # Commit and push → next run picks it up.
 # ─────────────────────────────────────────────
- 
+
 settings:
-  lookback_hours: 24          # how far back to fetch new items
+  lookback_hours: 168         # 7-day lookback for the weekly digest
   max_items_per_source: 3     # cap per source to keep email manageable
   model: claude-haiku-4-5-20251001   # swap to claude-sonnet-4-6 for better summaries
   whisper_model: base         # tiny | base | small — podcast transcription quality
- 
+
   # Summarization persona — change this to fit your role
   persona: "a senior RevOps and GTM consultant who advises B2B SaaS companies"
 
-  # Twitter section — runs daily with a 1-day lookback.
-  twitter_lookback_days: 1
+  # Twitter section — runs weekly with a 7-day lookback.
+  twitter_lookback_days: 7
  
 sources:
  
@@ -102,13 +102,13 @@ sources:
   - name: r/gtmengineering
     type: reddit
     subreddit: gtmengineering
-    time: day
+    time: week
     tags: [gtm, engineering]
 
   - name: r/ClaudeCode
     type: reddit
     subreddit: ClaudeCode
-    time: day
+    time: week
     tags: [ai, tools]
 
   # ── To add a new source ───────────────────────
