@@ -1,15 +1,15 @@
 # Daily Reader
 
-A personal AI digest that runs every morning and emails a summary of RSS feeds, podcasts, and Twitter — all in one email.
+A personal AI digest that runs every Monday morning and emails a summary of RSS feeds, podcasts, and Twitter — all in one email.
 
 ## What it does
 
-Runs daily at 7am PT via GitHub Actions:
+Runs every Monday at 7am PT via GitHub Actions:
 
 1. **RSS / blogs** — fetches new articles from configured sources, pulls full text via Jina, summarizes each with Claude
 2. **Podcasts** — downloads new episodes, transcribes with Whisper, summarizes
 3. **Twitter people** — searches recent tweets from a curated list of ~90 thinkers, founders, and SV influencers; groups by theme (AI, Economics, Ideas, etc.)
-4. **Trending hashtags** — finds the top 10 most engaged tweets from the past 24h across `#RevOps #GTM #SaaS #B2BGrowth #AIforBusiness` and related tags
+4. **Trending hashtags** — finds the top 10 most engaged tweets from the past 7 days across `#RevOps #GTM #SaaS #B2BGrowth #AIforBusiness` and related tags
 5. **Big picture rollup** — one paragraph connecting themes across all content
 6. Sends a single HTML email via Resend
 
@@ -30,11 +30,11 @@ Edit `config.yaml` to add/remove RSS feeds and podcasts. No code changes needed 
 
 ```yaml
 settings:
-  lookback_hours: 24
+  lookback_hours: 168
   max_items_per_source: 3
   model: claude-haiku-4-5-20251001
   persona: "a senior RevOps and GTM consultant..."
-  twitter_lookback_days: 1
+  twitter_lookback_days: 7
 
 sources:
   - name: Lenny's Newsletter
@@ -74,7 +74,7 @@ Add these four secrets to your repo (Settings → Secrets → Actions):
 
 ### 4. Enable the workflow
 
-The workflow runs automatically at 7am PT daily. You can also trigger it manually from the Actions tab.
+The workflow runs automatically every Monday at 7am PT. You can also trigger it manually from the Actions tab.
 
 ## Local development
 
@@ -98,7 +98,7 @@ python digest.py
 - **Whisper** — podcast transcription (runs in GitHub Actions with ffmpeg)
 - **Jina** — full-text article extraction from URLs
 - **Resend** — transactional email delivery
-- **GitHub Actions** — daily cron scheduling, SQLite deduplication committed back to repo
+- **GitHub Actions** — weekly cron scheduling, SQLite deduplication committed back to repo
 
 ## Deduplication
 

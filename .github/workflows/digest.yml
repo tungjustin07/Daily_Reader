@@ -1,8 +1,8 @@
-name: Daily digest
+name: Weekly digest
 
 on:
   schedule:
-    - cron: '0 14 * * *'  # 7am PT standard time (adjust to 15 for daylight saving)
+    - cron: '0 14 * * 1'  # Mondays 7am PT standard time (adjust to 15 for daylight saving)
   workflow_dispatch:        # run manually anytime from the Actions tab
 
 jobs:
