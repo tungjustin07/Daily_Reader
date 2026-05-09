@@ -6,7 +6,7 @@
 
 settings:
   lookback_hours: 168         # 7-day lookback for the weekly digest
-  max_items_per_source: 3     # cap per source to keep email manageable
+  max_items_per_source: 5     # cap per source — 5×17 sources is enough for a weekly
   model: claude-haiku-4-5-20251001   # swap to claude-sonnet-4-6 for better summaries
   whisper_model: base         # tiny | base | small — podcast transcription quality
 
