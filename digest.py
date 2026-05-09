@@ -310,6 +310,56 @@ def generate_rollup(summaries: list[str], rollup_prompt: str, model: str) -> str
         log.error(f"Rollup failed: {e}")
         return ""
 
+def generate_top5(items: list[dict], persona: str, model: str) -> list[dict]:
+    """Pick 5 highest-signal items from the past week. Reuses existing summaries (no re-summarization)."""
+    if len(items) <= 5:
+        return [dict(it, editor_note="") for it in items]
+    listing = "\n\n".join(
+        f"[{i}] {it['title']} ({it['source']})\n{it['summary']}"
+        for i, it in enumerate(items)
+    )
+    prompt = f"""You are {persona}. From these {len(items)} article/podcast summaries from the past week, pick the 5 highest-signal items — those with the most insight, novelty, or actionable takeaway for someone in this role.
+
+For each pick, write a 1-sentence editor's note (max 25 words) on why it matters this week.
+
+Output strictly this format, no preamble:
+INDEX: <number>
+NOTE: <editor's note>
+---
+INDEX: <number>
+NOTE: <editor's note>
+---
+(repeat for 5 picks total)
+
+Summaries:
+{listing}"""
+    try:
+        msg = client.messages.create(
+            model=model,
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = msg.content[0].text
+    except Exception as e:
+        log.error(f"Top 5 generation failed: {e}")
+        return []
+
+    picks: list[dict] = []
+    seen_idx: set[int] = set()
+    for block in text.split("---"):
+        idx_match = re.search(r"INDEX:\s*(\d+)", block)
+        note_match = re.search(r"NOTE:\s*(.+?)(?=\nINDEX:|\Z)", block, re.DOTALL)
+        if idx_match and note_match:
+            idx = int(idx_match.group(1))
+            if 0 <= idx < len(items) and idx not in seen_idx:
+                seen_idx.add(idx)
+                pick = dict(items[idx])
+                pick["editor_note"] = note_match.group(1).strip()
+                picks.append(pick)
+        if len(picks) >= 5:
+            break
+    return picks
+
 # ─────────────────────────────────────────────────────────────────────────────
 # TWITTER SECTION (weekly, Sundays only)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -470,7 +520,7 @@ Start directly with the first <h2> — no preamble."""}],
 # RENDER EMAIL
 # ─────────────────────────────────────────────────────────────────────────────
 
-def render_html(items: list[dict], rollup: str, twitter_section: str = "", hashtag_section: str = "") -> str:
+def render_html(items: list[dict], rollup: str, twitter_section: str = "", hashtag_section: str = "", top5: list[dict] | None = None) -> str:
     today = datetime.now().strftime("%A, %B %-d")
     sections = ""
     for item in items:
@@ -493,6 +543,26 @@ def render_html(items: list[dict], rollup: str, twitter_section: str = "", hasht
         <div style="background:#f5f7ff;border-left:3px solid #4f6ef7;padding:16px 20px;margin-bottom:28px;border-radius:0 8px 8px 0">
           <p style="margin:0 0 6px;font-size:11px;font-weight:600;color:#4f6ef7;text-transform:uppercase;letter-spacing:.08em">🧠 Big picture</p>
           <p style="margin:0;font-size:14px;line-height:1.7;color:#333">{rollup}</p>
+        </div>"""
+
+    top5_block = ""
+    if top5:
+        entries = ""
+        for i, item in enumerate(top5, 1):
+            icon = "🎙" if item.get("type") == "podcast" else "📄"
+            note = item.get("editor_note", "")
+            note_html = f'<p style="margin:6px 0 0;font-size:13px;line-height:1.6;color:#5a4a00">{note}</p>' if note else ""
+            entries += f"""
+          <div style="padding:14px 0;border-bottom:1px solid #f0e4b8">
+            <p style="margin:0 0 4px;font-size:11px;color:#9a7a00;text-transform:uppercase;letter-spacing:.08em">{icon} {item['source']}</p>
+            <h3 style="margin:0;font-size:15px;font-weight:600;color:#1a1a1a;line-height:1.3">
+              <a href="{item['url']}" style="color:#1a1a1a;text-decoration:none">{i}. {item['title']}</a>
+            </h3>{note_html}
+          </div>"""
+        top5_block = f"""
+        <div style="background:#fffbf0;border:1px solid #f0e4b8;padding:18px 22px;margin-bottom:28px;border-radius:8px">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:700;color:#b88800;text-transform:uppercase;letter-spacing:.1em">⭐ Top 5 of the week</p>
+          {entries}
         </div>"""
 
     twitter_block = ""
@@ -525,16 +595,24 @@ def render_html(items: list[dict], rollup: str, twitter_section: str = "", hasht
         <h1 style="margin:4px 0 0;font-size:24px;font-weight:700;color:#fff">{today}</h1>
         <p style="margin:6px 0 0;font-size:13px;color:#aaa">{len(items)} items · AI-summarized</p>
       </div>
-      <div style="padding:32px">{rollup_section}{twitter_block}{hashtag_block}{sections}
+      <div style="padding:32px">{rollup_section}{top5_block}{twitter_block}{hashtag_block}{sections}
         <p style="margin:0;font-size:11px;color:#bbb;text-align:center">Your weekly digest</p>
       </div>
     </div></body></html>"""
 
-def render_text(items: list[dict], rollup: str, twitter_section: str = "", hashtag_section: str = "") -> str:
+def render_text(items: list[dict], rollup: str, twitter_section: str = "", hashtag_section: str = "", top5: list[dict] | None = None) -> str:
     today = datetime.now().strftime("%A, %B %-d")
     lines = [f"WEEKLY DIGEST — {today}", "=" * 50, ""]
     if rollup:
         lines += ["BIG PICTURE", rollup, "", "-" * 50, ""]
+    if top5:
+        lines += ["⭐ TOP 5 OF THE WEEK", ""]
+        for i, item in enumerate(top5, 1):
+            lines += [f"{i}. {item['title']} ({item['source']})"]
+            if item.get("editor_note"):
+                lines += [f"   {item['editor_note']}"]
+            lines += [f"   {item['url']}", ""]
+        lines += ["-" * 50, ""]
     if twitter_section:
         clean = re.sub(r"<[^>]+>", " ", twitter_section)
         clean = re.sub(r"\s{2,}", " ", clean).strip()
@@ -625,14 +703,16 @@ def run(dry_run=False):
             mark_seen(conn, item["url"])
     conn.commit()  # single commit for all mark_seen calls
 
-    # 4. Rollup
+    # 4. Rollup + Top 5 picker (both reuse existing summaries — no extra fetch/summarize cost)
     rollup = generate_rollup(summaries_only, rollup_prompt, s["model"])
+    top5 = generate_top5(results, s["persona"], s["model"])
+    log.info(f"Top 5 picker selected {len(top5)} items")
 
-    # 4. Render + send
+    # 5. Render + send
     today = datetime.now().strftime("%b %-d, %Y")
     subject = f"Weekly RSS + Twitter Digest - {today}"
-    html = render_html(results, rollup, twitter_section, hashtag_section)
-    text = render_text(results, rollup, twitter_section, hashtag_section)
+    html = render_html(results, rollup, twitter_section, hashtag_section, top5)
+    text = render_text(results, rollup, twitter_section, hashtag_section, top5)
 
     if dry_run:
         print(text)
@@ -640,7 +720,7 @@ def run(dry_run=False):
 
     send_email(subject, html, text)
 
-    # 5. Save local copy
+    # 6. Save local copy
     out = Path("logs") / f"digest-{datetime.now().strftime('%Y%m%d')}.txt"
     out.write_text(text)
     log.info(f"Saved to {out}")

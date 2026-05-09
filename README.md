@@ -17,6 +17,7 @@ Runs every Monday at 7am PT via GitHub Actions:
 
 ```
 🧠 Big picture rollup
+⭐ Top 5 of the week  (Claude-curated picks across all sources, with editor's notes)
 🐦 This Week on Twitter  (curated people, by theme)
 🔥 Trending in RevOps / GTM / SaaS  (top hashtag tweets)
 📄 RSS articles + 🎙 Podcast summaries
@@ -31,7 +32,7 @@ Edit `config.yaml` to add/remove RSS feeds and podcasts. No code changes needed 
 ```yaml
 settings:
   lookback_hours: 168
-  max_items_per_source: 3
+  max_items_per_source: 5
   model: claude-haiku-4-5-20251001
   persona: "a senior RevOps and GTM consultant..."
   twitter_lookback_days: 7
