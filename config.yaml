@@ -63,6 +63,15 @@ sources:
  
   # ── Podcasts ─────────────────────────────────
   # Requires ffmpeg (installed automatically in the workflow)
+  # max_items (optional, per-source): overrides max_items_per_source below.
+  # Lenny's Podcast drops 2-4 eps/week — cap to the latest only so we don't
+  # transcribe (and email) near-duplicate episodes every week.
+  - name: Lenny's Podcast
+    type: podcast
+    url: https://api.substack.com/feed/podcast/10845.rss
+    max_items: 1
+    tags: [product, gtm]
+
   - name: Practical AI
     type: podcast
     url: https://changelog.com/practicalai/feed

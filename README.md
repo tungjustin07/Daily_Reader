@@ -49,6 +49,8 @@ sources:
 
 To add a new source, copy any block, update `name`/`url`, commit and push.
 
+For a source that publishes multiple items per week (e.g. a podcast with several episodes), add a per-source `max_items` to cap it below the global `max_items_per_source` — e.g. `max_items: 1` to only pull the latest episode.
+
 **Finding RSS feeds:**
 - Substack → `https://<name>.substack.com/feed`
 - Ghost → `https://<site>/rss/`
