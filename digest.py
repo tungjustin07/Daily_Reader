@@ -668,12 +668,13 @@ def run(dry_run=False):
     raw_items = []
     for source in sources:
         try:
+            max_items = source.get("max_items", s["max_items_per_source"])
             if source["type"] == "podcast":
-                raw_items += fetch_podcast_items(source, cutoff, conn, s["max_items_per_source"], s["whisper_model"])
+                raw_items += fetch_podcast_items(source, cutoff, conn, max_items, s["whisper_model"])
             elif source["type"] == "reddit":
-                raw_items += fetch_reddit_items(source, cutoff, conn, s["max_items_per_source"])
+                raw_items += fetch_reddit_items(source, cutoff, conn, max_items)
             else:
-                raw_items += fetch_rss_items(source, cutoff, conn, s["max_items_per_source"])
+                raw_items += fetch_rss_items(source, cutoff, conn, max_items)
         except Exception as e:
             log.error(f"Source '{source['name']}' failed: {e}")
 
