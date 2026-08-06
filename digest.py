@@ -310,33 +310,44 @@ def generate_rollup(summaries: list[str], rollup_prompt: str, model: str) -> str
         log.error(f"Rollup failed: {e}")
         return ""
 
+TOP5_MAX_PODCASTS = 2  # cap so richer podcast-summary format doesn't crowd out articles
+
 def generate_top5(items: list[dict], persona: str, model: str) -> list[dict]:
-    """Pick 5 highest-signal items from the past week. Reuses existing summaries (no re-summarization)."""
+    """Pick 5 highest-signal items from the past week. Reuses existing summaries (no re-summarization).
+
+    Podcast summaries (takeaways + a verbatim quote) read as more "insightful" to an LLM
+    picker than terse article bullets purely due to format, not content quality. To avoid
+    the top 5 concentrating on podcasts, we have the model rank a larger pool, then walk
+    that ranking in Python enforcing a hard cap on podcast picks.
+    """
     if len(items) <= 5:
         return [dict(it, editor_note="") for it in items]
+    pool_size = min(len(items), 10)
     listing = "\n\n".join(
-        f"[{i}] {it['title']} ({it['source']})\n{it['summary']}"
+        f"[{i}] {it['title']} ({it['source']}, {it['type']})\n{it['summary']}"
         for i, it in enumerate(items)
     )
-    prompt = f"""You are {persona}. From these {len(items)} article/podcast summaries from the past week, pick the 5 highest-signal items — those with the most insight, novelty, or actionable takeaway for someone in this role.
+    prompt = f"""You are {persona}. From these {len(items)} article/podcast summaries from the past week, rank the {pool_size} highest-signal items — those with the most insight, novelty, or actionable takeaway for someone in this role — best first.
 
-For each pick, write a 1-sentence editor's note (max 25 words) on why it matters this week.
+Judge on substance, not summary length or format — a terse article bullet can outrank a long podcast quote.
 
-Output strictly this format, no preamble:
+For each ranked pick, write a 1-sentence editor's note (max 25 words) on why it matters this week.
+
+Output strictly this format, no preamble, best pick first:
 INDEX: <number>
 NOTE: <editor's note>
 ---
 INDEX: <number>
 NOTE: <editor's note>
 ---
-(repeat for 5 picks total)
+(repeat for {pool_size} ranked picks total)
 
 Summaries:
 {listing}"""
     try:
         msg = client.messages.create(
             model=model,
-            max_tokens=600,
+            max_tokens=1000,
             messages=[{"role": "user", "content": prompt}],
         )
         text = msg.content[0].text
@@ -344,7 +355,7 @@ Summaries:
         log.error(f"Top 5 generation failed: {e}")
         return []
 
-    picks: list[dict] = []
+    ranked: list[dict] = []
     seen_idx: set[int] = set()
     for block in text.split("---"):
         idx_match = re.search(r"INDEX:\s*(\d+)", block)
@@ -355,7 +366,16 @@ Summaries:
                 seen_idx.add(idx)
                 pick = dict(items[idx])
                 pick["editor_note"] = note_match.group(1).strip()
-                picks.append(pick)
+                ranked.append(pick)
+
+    picks: list[dict] = []
+    podcast_count = 0
+    for pick in ranked:
+        if pick["type"] == "podcast" and podcast_count >= TOP5_MAX_PODCASTS:
+            continue
+        picks.append(pick)
+        if pick["type"] == "podcast":
+            podcast_count += 1
         if len(picks) >= 5:
             break
     return picks
